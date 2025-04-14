@@ -59,6 +59,11 @@ class GitShow(BaseModel):
 class GitInit(BaseModel):
     repo_path: str
 
+class GitClone(BaseModel):
+    repo_url: str
+    repo_path: str
+    branch_name: str
+
 class GitTools(str, Enum):
     STATUS = "git_status"
     DIFF_UNSTAGED = "git_diff_unstaged"
@@ -72,6 +77,7 @@ class GitTools(str, Enum):
     CHECKOUT = "git_checkout"
     SHOW = "git_show"
     INIT = "git_init"
+    CLONE = "git_clone"
 
 def git_status(repo: git.Repo) -> str:
     return repo.git.status()
@@ -146,6 +152,13 @@ def git_show(repo: git.Repo, revision: str) -> str:
         output.append(f"\n--- {d.a_path}\n+++ {d.b_path}\n")
         output.append(d.diff.decode('utf-8'))
     return "".join(output)
+
+def git_clone(repo_url: str, repo_path: str, branch_name: str) -> str:
+    try:
+        repo = git.Repo.clone_from(url=repo_url, to_path=repo_path, branch=branch_name, config="http.sslVerify=false", allow_unsafe_options=True)
+        return f"Cloned Git repository in {repo.git_dir}"
+    except Exception as e:
+        return f"Error cloning repository: {str(e)}"
 
 async def serve(repository: Path | None) -> None:
     logger = logging.getLogger(__name__)
@@ -222,6 +235,11 @@ async def serve(repository: Path | None) -> None:
                 name=GitTools.INIT,
                 description="Initialize a new Git repository",
                 inputSchema=GitInit.schema(),
+            ),
+            Tool(
+                name=GitTools.CLONE,
+                description="Clone an existing Git repository",
+                inputSchema=GitClone.schema(),
             )
         ]
 
@@ -257,7 +275,7 @@ async def serve(repository: Path | None) -> None:
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         repo_path = Path(arguments["repo_path"])
-        
+
         # Handle git init separately since it doesn't require an existing repo
         if name == GitTools.INIT:
             result = git_init(str(repo_path))
@@ -265,7 +283,13 @@ async def serve(repository: Path | None) -> None:
                 type="text",
                 text=result
             )]
-            
+        elif name == GitTools.CLONE:
+            result = git_clone(arguments["repo_url"], str(repo_path), arguments["branch_name"])
+            return [TextContent(
+                type="text",
+                text=result
+            )]
+
         # For all other commands, we need an existing repo
         repo = git.Repo(repo_path)
 
